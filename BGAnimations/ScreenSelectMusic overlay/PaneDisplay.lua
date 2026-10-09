@@ -141,7 +141,7 @@ local GetScoresRequestProcessor = function(res, params)
 								playerScore
 							)
 							local chartHash = data[playerStr]["chartHash"]
-							CacheSetGSEX(cachePlayerName, chartHash, ex_str)
+							CacheSet(cachePlayerName, chartHash, CacheType.EX, CacheSource.GrooveStats, ex_str)
 							-- GAMESTATE:GetCurrentSong() should hopefully be correct as the hash has been verified above.
 							MESSAGEMAN:Broadcast("CacheUpdatedGS", { Song = GAMESTATE:GetCurrentSong() })
 							personalRecordSet = true
@@ -153,7 +153,7 @@ local GetScoresRequestProcessor = function(res, params)
 
 							local scoreString = string.format("%.2f", gsScore)
 							local chartHash = data[playerStr]["chartHash"]
-							CacheSetGSITG(cachePlayerName, chartHash, scoreString)
+							CacheSet(cachePlayerName, chartHash, CacheType.ITG, CacheSource.GrooveStats, scoreString)
 							MESSAGEMAN:Broadcast("CacheUpdatedGS", { Song = GAMESTATE:GetCurrentSong() })
 
 							-- GetPercentDP() returns a value like 0.9823, so we need to multiply it by 100 to get 98.23

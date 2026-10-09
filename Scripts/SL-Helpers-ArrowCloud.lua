@@ -1,0 +1,159 @@
+local URL = "https://api.arrowcloud.dance/v1/retrieve-scores"
+local TIMEOUT = 15
+local MAX_HASHES = 1000
+local ERROR_PAUSE = 60
+local LEADERBOARDS = { [CacheType.EX] = 2, [CacheType.ITG] = 3 }
+
+local profile_slot = {
+	[PLAYER_1] = "ProfileSlot_Player1",
+	[PLAYER_2] = "ProfileSlot_Player2",
+}
+
+function ParseArrowCloudIni(player)
+	if not profile_slot[player] then return end
+	local pn = ToEnumShortString(player)
+	SL[pn].ArrowCloudApiKey = ""
+
+	local dir = PROFILEMAN:GetProfileDir(profile_slot[player])
+	if not dir or #dir == 0 then return end
+	local path = dir .. "ArrowCloud.ini"
+	if not FILEMAN:DoesFileExist(path) then return end
+
+	local contents = IniFile.ReadFile(path)
+	local key = contents and type(contents.ArrowCloud) == "table" and contents.ArrowCloud.ApiKey
+	if type(key) == "string" then SL[pn].ArrowCloudApiKey = key end
+end
+
+ArrowCloudScores = {}
+
+-- per player: { pn, key, name, pending = {hash=true}, groups = {name=true}, inflight = {handler, hashes}?, disabled }
+local State = {}
+local PausedUntil = 0
+
+local function StateFor(player)
+	local pn = ToEnumShortString(player)
+	local key = SL[pn].ArrowCloudApiKey
+	if key == "" or not PROFILEMAN:IsPersistentProfile(player) then return nil end
+	local s = State[pn]
+	if not s or s.key ~= key then
+		s = { pn = pn, key = key, name = PROFILEMAN:GetPlayerName(player), pending = {}, groups = {} }
+		State[pn] = s
+	end
+	return s
+end
+
+local function Queue(s, steps)
+	local hash = steps:GetGrooveStatsHash()
+	if hash and hash ~= "" then s.pending[hash] = true end
+end
+
+local function Failure(response)
+	return tostring(response.error and ToEnumShortString(response.error) or response.statusCode)
+end
+
+local function LampIndex(play)
+	if play.grade == "F" then return 6 end
+	local j = type(play.judgments) == "table" and play.judgments or {}
+	local r = type(play.radar) == "table" and play.radar or {}
+	local function n(v) return tonumber(v) or 0 end
+
+	local dropped = (n(r.holdsTotal) - n(r.holdsHeld)) + (n(r.rollsTotal) - n(r.rollsHit))
+	if dropped > 0 or n(j["Miss"]) > 0 or n(j["Way Off"]) > 0 or n(j["Decent"]) > 0 then return nil end
+	if n(j["Great"]) > 0 then return 4 end
+	if n(j["Excellent"]) > 0 then return 3 end
+	if n(j["Fantastic (23ms)"]) > 0 or n(r.minesTotal) - n(r.minesDodged) > 0 then return 1 end
+	return 5
+end
+
+-- body.scores: { [hash: string] = { [leaderboardId: string] = play } }
+-- play: { score: number, grade: string,
+--         judgments: { [string]: number },
+--         radar: { minesTotal, minesDodged, holdsTotal, holdsHeld, rollsTotal, rollsHit: number } }
+local function Store(s, body)
+	local scores = type(body) == "table" and body.scores
+	if type(scores) ~= "table" then return 0 end
+	local rows = 0
+	CacheBatch(function()
+		for hash, entry in pairs(scores) do
+			for score_type, id in pairs(LEADERBOARDS) do
+				local play = type(entry) == "table" and entry[tostring(id)]
+				local score = type(play) == "table" and tonumber(play.score)
+				if score then
+					local idx = LampIndex(play)
+					CacheSet(s.name, hash, score_type, CacheSource.ArrowCloud, ("%05.2f"):format(score), idx and ("%d"):format(idx) or nil)
+					rows = rows + 1
+				end
+			end
+		end
+	end)
+	return rows
+end
+
+local function Send(s)
+	local hashes = {}
+	for hash in pairs(s.pending) do
+		if #hashes >= MAX_HASHES then break end
+		hashes[#hashes + 1] = hash
+		s.pending[hash] = nil
+	end
+	if #hashes == 0 then return end
+
+	local request = { hashes = hashes }
+	s.inflight = request
+	request.handler = NETWORK:HttpRequest{
+		url = URL,
+		method = "POST",
+		body = JsonEncode({ chartHashes = hashes, leaderboardIds = { LEADERBOARDS[CacheType.EX], LEADERBOARDS[CacheType.ITG] } }),
+		headers = { Authorization = "Bearer " .. s.key, ["Content-Type"] = "application/json" },
+		connectTimeout = TIMEOUT,
+		transferTimeout = TIMEOUT,
+		onResponse = function(response)
+			if s.inflight ~= request then return end
+			s.inflight = nil
+			local code = response.statusCode
+			if code == 401 or code == 403 then
+				lua.Warn("ArrowCloudScores: HTTP " .. code .. " for " .. s.pn .. ", disabling for this session")
+				s.disabled = true
+			elseif response.error or code ~= 200 then
+				lua.Warn("ArrowCloudScores: request failed (" .. Failure(response) .. ")")
+				PausedUntil = GetTimeSinceStart() + ERROR_PAUSE
+				for _, hash in ipairs(hashes) do s.pending[hash] = true end
+			elseif Store(s, JsonDecode(response.body)) > 0 then
+				MESSAGEMAN:Broadcast("ArrowCloudScoresUpdated")
+			end
+		end,
+	}
+end
+
+function ArrowCloudScores.Request(player, song, steps)
+	local s = StateFor(player)
+	if not s or s.disabled then return end
+	if steps then Queue(s, steps) end
+
+	local group = song:GetGroupName()
+	if not s.groups[group] then
+		s.groups[group] = true
+		for g_song in ivalues(SONGMAN:GetSongsInGroup(group)) do
+			for st in ivalues(SongUtil.GetPlayableSteps(g_song)) do Queue(s, st) end
+		end
+	end
+end
+
+function ArrowCloudScores.Flush()
+	if GetTimeSinceStart() < PausedUntil then return end
+	for _, s in pairs(State) do
+		if not s.disabled and not s.inflight and next(s.pending) then Send(s) end
+	end
+end
+
+function ArrowCloudScores.Cancel()
+	for _, s in pairs(State) do
+		local request = s.inflight
+		if request then
+			s.inflight = nil
+			request.handler:Cancel()
+			for _, hash in ipairs(request.hashes) do s.pending[hash] = true end
+		end
+	end
+end
+

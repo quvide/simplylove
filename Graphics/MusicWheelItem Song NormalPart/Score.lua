@@ -3,48 +3,6 @@ local player = ...
 local pn = ToEnumShortString(player)
 local white = color("#ffffff")
 
-local function ExScoreFromHighScore(hs, steps)
-	-- the white fantastic count is stored in the score field
-	-- https://discord.com/channels/292111865658474496/958039182327029840/1156796786061606972
-	local score = hs:GetScore()
-	local ex_counts = {
-		W0 = hs:GetTapNoteScore("TapNoteScore_W1") - score,
-		W1 = score,
-		W2 = hs:GetTapNoteScore("TapNoteScore_W2"),
-		W3 = hs:GetTapNoteScore("TapNoteScore_W3"),
-		W4 = hs:GetTapNoteScore("TapNoteScore_W4"),
-		W5 = hs:GetTapNoteScore("TapNoteScore_W5"),
-		Miss = hs:GetTapNoteScore("TapNoteScore_Miss"),
-		Held = hs:GetHoldNoteScore("HoldNoteScore_Held"),
-		LetGo = hs:GetHoldNoteScore("HoldNoteScore_LetGo"),
-		HitMine = hs:GetTapNoteScore("TapNoteScore_HitMine"),
-	}
-	return CalculateExScoreNoGlobalState(steps, pn, false, ex_counts, true)
-end
-
-local function MusicRate(hs)
-	return tonumber(string.match(hs:GetModifiers(), "([%d%.]+)xMusic")) or 1
-end
-
--- Lamp colour index into SL.JudgmentColors["FA+"]:
--- 1 blue (FFC), 2 white, 3 gold (FEC), 4 green (FC), 5 purple (quint), 6 red (fail)
-local AwardMap = {
-	StageAward_FullComboW1 = 1,
-	StageAward_FullComboW2 = 3,
-	StageAward_SingleDigitW2 = 3,
-	StageAward_OneW2 = 3,
-	StageAward_FullComboW3 = 4,
-	StageAward_SingleDigitW3 = 4,
-	StageAward_OneW3 = 4,
-	StageAward_100PercentW3 = 4,
-}
-
-local function LampIndex(hs)
-	if hs:GetGrade() == "Grade_Failed" then return 6 end
-	if hs:GetGrade() == "Grade_Tier01" and hs:GetPercentDP() == 1.0 and hs:GetScore() == 0 then return 5 end
-	return AwardMap[hs:GetStageAward()] or 2
-end
-
 -- Best local score as a formatted string plus lamp index.
 local function LocalScore(song, steps, score_type)
 	local name = PROFILEMAN:GetPlayerName(player)
@@ -54,8 +12,8 @@ local function LocalScore(song, steps, score_type)
 
 	local best_hs, best_value
 	for hs in ivalues(PROFILEMAN:GetProfile(pn):GetHighScoreList(song, steps):GetHighScores()) do
-		if MusicRate(hs) >= 1 then
-			local value = score_type == CacheType.EX and ExScoreFromHighScore(hs, steps) or hs:GetPercentDP() * 100
+		if HighScoreMusicRate(hs) >= 1 then
+			local value = score_type == CacheType.EX and HighScoreExScore(hs, steps, pn) or hs:GetPercentDP() * 100
 			if value and (not best_value or value > best_value) then
 				best_hs, best_value = hs, value
 			end
@@ -68,7 +26,7 @@ local function LocalScore(song, steps, score_type)
 	end
 
 	local live = ("%05.2f"):format(best_value)
-	local idx = ("%d"):format(LampIndex(best_hs))
+	local idx = ("%d"):format(HighScoreLampIndex(best_hs))
 	if live ~= cached or idx ~= cached_idx then
 		CacheSet(name, hash, score_type, CacheSource.Local, live, idx)
 	end

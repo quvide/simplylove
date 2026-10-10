@@ -1,4 +1,4 @@
-local URL = "https://api.arrowcloud.dance/v1/retrieve-scores"
+local API = "https://api.arrowcloud.dance"
 local TIMEOUT = 15
 local MAX_HASHES = 1000
 local ERROR_PAUSE = 60
@@ -101,7 +101,7 @@ local function Send(s)
 	local request = { hashes = hashes }
 	s.inflight = request
 	request.handler = NETWORK:HttpRequest{
-		url = URL,
+		url = API .. "/v1/retrieve-scores",
 		method = "POST",
 		body = JsonEncode({ chartHashes = hashes, leaderboardIds = { LEADERBOARDS[CacheType.EX], LEADERBOARDS[CacheType.ITG] } }),
 		headers = { Authorization = "Bearer " .. s.key, ["Content-Type"] = "application/json" },
@@ -157,3 +157,51 @@ function ArrowCloudScores.Cancel()
 	end
 end
 
+local function SelfRank(board)
+	if type(board.scores) ~= "table" then return nil end
+	for entry in ivalues(board.scores) do
+		if entry.isSelf then return tonumber(entry.rank), tonumber(board.total) end
+	end
+end
+
+-- callback(rank, total, board_type?) when ranked, callback(false) when on no board,
+-- callback(nil) on failure. Returns the handler or nil.
+function ArrowCloudScores.FetchRank(player, steps, score_type, callback)
+	local pn = ToEnumShortString(player)
+	local key = SL[pn].ArrowCloudApiKey
+	local hash = steps and steps:GetGrooveStatsHash()
+	if key == "" or not hash or hash == "" then return nil end
+	local id = LEADERBOARDS[score_type]
+
+	return NETWORK:HttpRequest{
+		url = API .. "/v1/chart/" .. hash .. "/leaderboards",
+		method = "GET",
+		headers = { Authorization = "Bearer " .. key },
+		connectTimeout = TIMEOUT,
+		transferTimeout = TIMEOUT,
+		onResponse = function(response)
+			if response.error or response.statusCode ~= 200 then
+				lua.Warn("ArrowCloudScores: leaderboard request failed (" .. Failure(response) .. ")")
+				return callback(nil)
+			end
+			local body = JsonDecode(response.body)
+			local boards = type(body) == "table" and body.leaderboards
+			if type(boards) ~= "table" then
+				lua.Warn("ArrowCloudScores: unexpected leaderboard response for " .. hash)
+				return callback(nil)
+			end
+
+			for board in ivalues(boards) do
+				if board.id == id then
+					local rank, total = SelfRank(board)
+					if rank then return callback(rank, total) end
+				end
+			end
+			for board in ivalues(boards) do
+				local rank, total = SelfRank(board)
+				if rank then return callback(rank, total, tostring(board.type)) end
+			end
+			callback(false)
+		end,
+	}
+end

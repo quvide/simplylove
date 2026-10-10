@@ -46,9 +46,10 @@ local function PreviousBest()
 	local hash = steps:GetGrooveStatsHash()
 	local function ConsiderCached(source)
 		local cached, cached_lamp = CacheGet(name, hash, score_type, source)
+		local lamp = ParseLamp(cached_lamp)
 		-- Failed plays don't count as a best
-		if cached and tonumber(cached_lamp) ~= 6 then
-			Consider(tonumber((cached:gsub("[^%d%.]", ""))), tonumber(cached_lamp))
+		if cached and lamp ~= 6 then
+			Consider(tonumber((cached:gsub("[^%d%.]", ""))), lamp)
 		end
 	end
 	ConsiderCached(CacheSource.Local)

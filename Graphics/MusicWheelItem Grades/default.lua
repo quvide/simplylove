@@ -70,6 +70,15 @@ local af = Def.ActorFrame {
 				return
 			end
 
+			-- Stack vertically with the other player if they have a score instead of grade
+			local pn = params.PlayerNumber
+			local other = pn == PLAYER_1 and PLAYER_2 or PLAYER_1
+			if GAMESTATE:GetNumSidesJoined() == 2 and PlayerMusicWheelScore(other) == PlayerMusicWheelScore_ReplaceGrade then
+				self:zoom(SL_WideScale(0.12, 0.2)):xy(pn == PLAYER_1 and WideScale(22, 15) or WideScale(6, -15), pn == PLAYER_1 and -8 or 8)
+			else
+				self:zoom(SL_WideScale(0.18, 0.3)):xy(0, 0)
+			end
+
 			self:visible(true):setstate(state)
 		end
 	},

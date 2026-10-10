@@ -1,14 +1,14 @@
--- Song wheel score: the best of the local, ArrowCloud and GrooveStats scores.
+-- Song wheel score: the best of the local, ArrowCloud and GrooveStats scores, plus its lamp's judgment count.
 local player = ...
 local pn = ToEnumShortString(player)
 local white = color("#ffffff")
 
--- Best local score as a formatted string plus lamp index.
+-- Best local score as a formatted string plus its lamp string.
 local function LocalScore(song, steps, score_type)
 	local name = PROFILEMAN:GetPlayerName(player)
 	local hash = steps:GetGrooveStatsHash()
-	local cached, cached_idx = CacheGet(name, hash, score_type, CacheSource.Local)
-	if cached and song ~= GAMESTATE:GetCurrentSong() then return cached, tonumber(cached_idx) end
+	local cached, cached_lamp = CacheGet(name, hash, score_type, CacheSource.Local)
+	if cached and song ~= GAMESTATE:GetCurrentSong() then return cached, cached_lamp end
 
 	local best_hs, best_value
 	for hs in ivalues(PROFILEMAN:GetProfile(pn):GetHighScoreList(song, steps):GetHighScores()) do
@@ -26,32 +26,26 @@ local function LocalScore(song, steps, score_type)
 	end
 
 	local live = ("%05.2f"):format(best_value)
-	local idx = ("%d"):format(HighScoreLampIndex(best_hs))
-	if live ~= cached or idx ~= cached_idx then
-		CacheSet(name, hash, score_type, CacheSource.Local, live, idx)
+	local lamp = HighScoreLampString(best_hs)
+	if live ~= cached or lamp ~= cached_lamp then
+		CacheSet(name, hash, score_type, CacheSource.Local, live, lamp)
 	end
-	return live, tonumber(idx)
+	return live, lamp
 end
 
 local function Layout(self)
-	local two = GAMESTATE:GetNumSidesJoined() == 2
 	local mode = PlayerMusicWheelScore(player)
 	local other = PlayerMusicWheelScore(player == PLAYER_1 and PLAYER_2 or PLAYER_1)
+	local two = GAMESTATE:GetNumSidesJoined() == 2
 
-	if two and mode == other then
-		self:y(player == PLAYER_1 and -11 or 4)
+	if mode == PlayerMusicWheelScore_ReplaceGrade then
+		self:x(32)
 	else
-		self:y(-4)
-	end
-
-	if mode ~= PlayerMusicWheelScore_ReplaceGrade then
 		self:x(_screen.w / WideScale(2.15, 2.14) - 35)
-	elseif two and other ~= PlayerMusicWheelScore_ReplaceGrade then
-		-- the other player's grade is drawn next to us
-		if player == PLAYER_1 then self:x(20):maxwidth(160) else self:x(50):maxwidth(0) end
-	else
-		self:x(32):maxwidth(0)
 	end
+
+	local stacked = two and (mode == other or mode == PlayerMusicWheelScore_ReplaceGrade)
+	self:y(stacked and (player == PLAYER_1 and -11 or 4) or -4)
 end
 
 local function Draw(self, song, steps)
@@ -62,11 +56,10 @@ local function Draw(self, song, steps)
 	local name = PROFILEMAN:GetPlayerName(player)
 	local hash = steps:GetGrooveStatsHash()
 
-	local best, best_color
-	local function Consider(score, idx)
+	local best, best_lamp
+	local function Consider(score, lamp)
 		if score and (not best or tonumber(score) > tonumber(best)) then
-			best = score
-			best_color = idx and SL.JudgmentColors["FA+"][tonumber(idx)] or white
+			best, best_lamp = score, lamp
 		end
 	end
 	Consider(LocalScore(song, steps, score_type))
@@ -77,14 +70,22 @@ local function Draw(self, song, steps)
 	if ThemePrefs.Get("EnableGrooveStats") then
 		Consider(CacheGet(name, hash, score_type, CacheSource.GrooveStats))
 	end
+	if not best then return end
 
-	if best then self:settext(best):diffuse(best_color):visible(true) end
+	local idx, count = ParseLamp(best_lamp)
+	local c = idx and SL.JudgmentColors["FA+"][idx] or white
+	local score = self:GetChild("Score")
+	score:settext(best):diffuse(c)
+
+	-- Color exceptions: misses for a clear, whites for a FFC
+	local digit_color = ({ [1] = white, [2] = SL.JudgmentColors["FA+"][6] })[idx] or c
+	self:GetChild("Count"):settext(count and count < 10 and tostring(count) or ""):diffuse(digit_color)
+		:x(score:GetZoomedWidth() / 2 + 2)
+	self:visible(true)
 end
 
-return MusicWheelItem(player, Def.BitmapText {
-	Font = "Wendy/_wendy monospace numbers",
-	Text = "",
-	InitCommand = function(self) self:visible(false):zoom(0.2) end,
+return MusicWheelItem(player, Def.ActorFrame {
+	InitCommand = function(self) self:visible(false) end,
 	Draw = Draw,
 
 	CacheUpdatedGSMessageCommand = function(self, params)
@@ -96,4 +97,19 @@ return MusicWheelItem(player, Def.BitmapText {
 	ArrowCloudScoresUpdatedMessageCommand = function(self)
 		self:queuecommand("Refresh")
 	end,
+
+	Def.BitmapText {
+		Name = "Score",
+		Font = "Wendy/_wendy monospace numbers",
+		Text = "",
+		InitCommand = function(self) self:zoom(0.2) end,
+	},
+
+	-- Superscript judge digit
+	Def.BitmapText {
+		Name = "Count",
+		Font = "Wendy/_wendy monospace numbers",
+		Text = "",
+		InitCommand = function(self) self:zoom(0.12):horizalign(left):y(-1) end,
+	},
 })

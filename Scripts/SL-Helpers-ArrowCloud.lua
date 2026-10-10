@@ -51,18 +51,32 @@ local function Failure(response)
 	return tostring(response.error and ToEnumShortString(response.error) or response.statusCode)
 end
 
-local function LampIndex(play)
-	if play.grade == "F" then return 6 end
+-- Slot = lamp index, as in HighScoreLampString
+local function LampCounts(play)
 	local j = type(play.judgments) == "table" and play.judgments or {}
 	local r = type(play.radar) == "table" and play.radar or {}
 	local function n(v) return tonumber(v) or 0 end
+	return {
+		[1] = n(j["Fantastic (23ms)"]) + n(r.minesTotal) - n(r.minesDodged),
+		[2] = n(j["Decent"]) + n(j["Way Off"]) + n(j["Miss"]) + n(r.holdsTotal) - n(r.holdsHeld) + n(r.rollsTotal) - n(r.rollsHit),
+		[3] = n(j["Excellent"]),
+		[4] = n(j["Great"]),
+	}
+end
 
-	local dropped = (n(r.holdsTotal) - n(r.holdsHeld)) + (n(r.rollsTotal) - n(r.rollsHit))
-	if dropped > 0 or n(j["Miss"]) > 0 or n(j["Way Off"]) > 0 or n(j["Decent"]) > 0 then return nil end
-	if n(j["Great"]) > 0 then return 4 end
-	if n(j["Excellent"]) > 0 then return 3 end
-	if n(j["Fantastic (23ms)"]) > 0 or n(r.minesTotal) - n(r.minesDodged) > 0 then return 1 end
+local function PlayLampIndex(play, counts)
+	if play.grade == "F" then return 6 end
+	if counts[2] > 0 then return nil end
+	if counts[4] > 0 then return 4 end
+	if counts[3] > 0 then return 3 end
+	if counts[1] > 0 then return 1 end
 	return 5
+end
+
+local function PlayLamp(play)
+	local counts = LampCounts(play)
+	local idx = PlayLampIndex(play, counts)
+	return LampString(idx, idx and counts[idx])
 end
 
 -- body.scores: { [hash: string] = { [leaderboardId: string] = play } }
@@ -79,8 +93,7 @@ local function Store(s, body)
 				local play = type(entry) == "table" and entry[tostring(id)]
 				local score = type(play) == "table" and tonumber(play.score)
 				if score then
-					local idx = LampIndex(play)
-					CacheSet(s.name, hash, score_type, CacheSource.ArrowCloud, ("%05.2f"):format(score), idx and ("%d"):format(idx) or nil)
+					CacheSet(s.name, hash, score_type, CacheSource.ArrowCloud, ("%05.2f"):format(score), PlayLamp(play))
 					rows = rows + 1
 				end
 			end

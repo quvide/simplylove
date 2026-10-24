@@ -86,6 +86,9 @@ local af = Def.ActorFrame{
 	-- This is only added in "dance" mode and if the service is available.
 	LoadActor("./Leaderboard.lua"),
 
+	-- Fetch ArrowCloud scores
+	LoadActor("./ArrowCloudScores.lua"),
+
 	LoadActor("./SongSearch/default.lua"),
 }
 

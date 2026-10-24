@@ -53,7 +53,7 @@ local af = Def.ActorFrame {
 		--     NumTimesPlayed (number)
 		--     HighScoreList (as of ITGmania 1.0.1 -- NOTE: can be removed in a future version)
 		SetGradeCommand=function(self, params)
-			local musicWheelScoreReplaceGrade = SLMusicWheelScoreEnabled() and PlayerMusicWheelScore(params.PlayerNumber) == PlayerMusicWheelScore_ReplaceGrade
+			local musicWheelScoreReplaceGrade = PlayerMusicWheelScore(params.PlayerNumber) == PlayerMusicWheelScore_ReplaceGrade
 			if not params.Grade or musicWheelScoreReplaceGrade then
 				self:visible(false)
 				return
@@ -68,6 +68,15 @@ local af = Def.ActorFrame {
 			if not state then
 				self:visible(false)
 				return
+			end
+
+			-- Stack vertically with the other player if they have a score instead of grade
+			local pn = params.PlayerNumber
+			local other = pn == PLAYER_1 and PLAYER_2 or PLAYER_1
+			if GAMESTATE:GetNumSidesJoined() == 2 and PlayerMusicWheelScore(other) == PlayerMusicWheelScore_ReplaceGrade then
+				self:zoom(SL_WideScale(0.12, 0.2)):xy(pn == PLAYER_1 and WideScale(22, 15) or WideScale(6, -15), pn == PLAYER_1 and -8 or 8)
+			else
+				self:zoom(SL_WideScale(0.18, 0.3)):xy(0, 0)
 			end
 
 			self:visible(true):setstate(state)

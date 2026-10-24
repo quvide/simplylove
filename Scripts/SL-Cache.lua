@@ -1,132 +1,77 @@
+-- Persistent score cache (simplylove.db) keyed by player name and chart hash.
 local sqlite3 = sqlite3 -- Provided by lsqlite3
 
-local function Cache_DBG(message)
-	-- lua.Info(message)
-end
+CacheType = { EX = "ex", ITG = "itg" }
+CacheSource = { Local = "local", GrooveStats = "groovestats", ArrowCloud = "arrowcloud" }
 
-local function CacheInitialize()
-	if not sqlite3 then return end
-	local db = sqlite3.open("simplylove.db")
-	if not db then return end
-	db:exec("CREATE TABLE meta (schema_version INTEGER PRIMARY KEY);")
-
-	db:exec([[
-		CREATE TABLE score_cache (
+local Db = sqlite3 and sqlite3.open("simplylove.db")
+local SetStmt, GetStmt, DeleteStmt
+if Db then
+	Db:exec([[
+		CREATE TABLE IF NOT EXISTS score_cache (
 			player TEXT NOT NULL,
 			hash TEXT NOT NULL,
 			score TEXT NOT NULL,
 			score_type TEXT NOT NULL,
 			score_source TEXT NOT NULL,
 			score_color TEXT,
-			UNIQUE(
-				player,
-				hash,
-				score_source,
-				score_type
-			) ON CONFLICT REPLACE
+			UNIQUE(player, hash, score_source, score_type) ON CONFLICT REPLACE
 		);
 	]])
-
-	Cache_DBG("Created tables")
-	return db
+	Db:exec("PRAGMA journal_mode=WAL;")
+	Db:exec("PRAGMA synchronous=NORMAL;")
+	SetStmt = Db:prepare("INSERT INTO score_cache(player, hash, score_type, score_source, score, score_color) VALUES (?, ?, ?, ?, ?, ?)")
+	GetStmt = Db:prepare("SELECT score, score_color FROM score_cache WHERE player=? AND hash=? AND score_type=? AND score_source=?")
+	DeleteStmt = Db:prepare("DELETE FROM score_cache WHERE player=? AND hash=? AND score_type=? AND score_source=?")
 end
-
-local Db = CacheInitialize()
-if not Db then
+if not (Db and SetStmt and GetStmt and DeleteStmt) then
 	lua.Warn("Initializing SL cache failed")
+	Db = nil
 end
 
 ---@param player string
 ---@param hash string
+---@param score_type string CacheType
+---@param score_source string CacheSource
 ---@param score string
----@param score_type string
----@param score_source string
 ---@param score_color string?
-local function CacheSet(player, hash, score, score_type, score_source, score_color)
+function CacheSet(player, hash, score_type, score_source, score, score_color)
 	if not Db then return end
-
-	Cache_DBG(string.format("CacheSet %s %s %s %s %s %s", player, hash, score, score_type, score_source, score_color or "nil"))
-	local stmt = Db:prepare("INSERT INTO score_cache(player, hash, score, score_type, score_source, score_color) VALUES (?, ?, ?, ?, ?, ?)")
-	stmt:bind_values(player, hash, score, score_type, score_source, score_color)
-	stmt:step()
-	stmt:finalize()
+	SetStmt:bind_values(player, hash, score_type, score_source, score, score_color)
+	SetStmt:step()
+	SetStmt:reset()
 end
 
 ---@param player string
 ---@param hash string
----@param score_type string
----@param score_source string
+---@param score_type string CacheType
+---@param score_source string CacheSource
 ---@return string?, string?
-local function CacheGet(player, hash, score_type, score_source)
+function CacheGet(player, hash, score_type, score_source)
 	if not Db then return nil, nil end
-
-	Cache_DBG(string.format("CacheGet %s %s %s %s", player, hash, score_type, score_source))
-	local stmt = Db:prepare("SELECT score, score_color FROM score_cache WHERE player=? AND hash=? AND score_type=? AND score_source=?")
-	stmt:bind_values(player, hash, score_type, score_source)
-	local ret_step = stmt:step()
-	if ret_step ~= sqlite3.ROW then
-		return nil, nil
+	GetStmt:bind_values(player, hash, score_type, score_source)
+	local score, score_color
+	if GetStmt:step() == sqlite3.ROW then
+		score, score_color = GetStmt:get_value(0), GetStmt:get_value(1)
 	end
-	local score = stmt:get_value(0)
-	local score_color = stmt:get_value(1)
-	stmt:finalize()
+	GetStmt:reset()
 	return score, score_color
 end
 
 ---@param player string
 ---@param hash string
----@param score string
-function CacheSetGSEX(player, hash, score)
-	CacheSet(player, hash, score, "ex", "groovestats", nil)
+---@param score_type string CacheType
+---@param score_source string CacheSource
+function CacheDelete(player, hash, score_type, score_source)
+	if not Db then return end
+	DeleteStmt:bind_values(player, hash, score_type, score_source)
+	DeleteStmt:step()
+	DeleteStmt:reset()
 end
 
----@param player string
----@param hash string
----@return string?, string?
-function CacheGetGSEX(player, hash)
-	return CacheGet(player, hash, "ex", "groovestats")
-end
-
----@param player string
----@param hash string
----@param score string
----@param color string
-function CacheSetLocalEX(player, hash, score, color)
-	CacheSet(player, hash, score, "ex", "local", color)
-end
-
----@param player string
----@param hash string
----@return string?, string?
-function CacheGetLocalEX(player, hash)
-	return CacheGet(player, hash, "ex", "local")
-end
-
----@param player string
----@param hash string
----@param score string
-function CacheSetGSITG(player, hash, score)
-	CacheSet(player, hash, score, "itg", "groovestats", nil)
-end
-
----@param player string
----@param hash string
----@return string?, string?
-function CacheGetGSITG(player, hash)
-	return CacheGet(player, hash, "itg", "groovestats")
-end
-
----@param player string
----@param hash string
----@param score string
----@param color string
-function CacheSetLocalITG(player, hash, score, color)
-	CacheSet(player, hash, score, "itg", "local", color)
-end
-
----@param player string
----@param hash string
----@return string?, string?
-function CacheGetLocalITG(player, hash)
-	return CacheGet(player, hash, "itg", "local")
+-- Runs fn inside one transaction.
+function CacheBatch(fn)
+	if Db then Db:exec("BEGIN") end
+	fn()
+	if Db then Db:exec("COMMIT") end
 end

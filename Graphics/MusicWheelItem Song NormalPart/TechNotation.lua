@@ -1,102 +1,28 @@
--- Song wheel tech analysis
-
+-- Song wheel tech notation
 local player = ...
 local pn = ToEnumShortString(player)
 
+local function Draw(self, song, steps)
+	if not GAMESTATE:IsHumanPlayer(player) then return end
 
--- TODO: 2 actors, one for each player. Could this be one actor that draws both players?
-local af = Def.BitmapText {
+	local scoreOnRight = MusicWheelScoreOnRight() or (not SLMusicWheelScoreEnabled() and IsItlSong(song, player))
+	self:x(_screen.w / WideScale(2.15, 2.14) - (scoreOnRight and 60 or 10))
+	if GAMESTATE:GetNumSidesJoined() == 2 then
+		self:y(player == PLAYER_1 and -6 or 6)
+	else
+		self:y(0)
+	end
+
+	self:settext(SLTechNotation_Format(steps, pn, ThemePrefs.Get("MusicWheelTechNotation")))
+	self:visible(true)
+end
+
+return MusicWheelItem(player, Def.BitmapText {
 	Font = "Common Normal",
 	Text = "",
 	InitCommand = function(self)
-		-- TODO: is this a good position? wide screen should have space to make the music wheel wider
-		-- position on right side of the song title, left of ITL EX
-		-- fits the maximum 6 techs
-		self:visible(false)
-		self:horizalign(right)
-		self:zoom(0.6)
+		self:visible(false):horizalign(right):zoom(0.6)
 		if DarkUI() then self:diffuse(0, 0, 0, 1) end
 	end,
-	-- Set is called by MusicWheelItem::HandleMessage. There are a bunch of messages that can trigger it.
-	SetCommand = function(self, params)
-		-- default to invisible, if we fail to process something, we just return immediately and stay hidden
-		self:visible(false)
-
-		-- params is null sometimes for some reason?
-		-- this seems to happen when changing songs and the previous diff doesn't exist for the new one
-		-- we eventually do seem to get valid params
-		if not params or not params.Song then
-			-- SM("Null params")
-			return
-		end
-
-		-- song of _this_ actor (every song on the music wheel)
-		local song = params.Song
-		if song == nil then
-			-- SM("Song is nil")
-			return
-		end
-
-		if not GAMESTATE:IsHumanPlayer(pn) then
-			return
-		end
-
-		-- TODO: is there a better way of laying this out?
-		local x_offset = 10
-		local musicWheelScoreYes = SLMusicWheelScoreEnabled() and (PlayerMusicWheelScore(PLAYER_1) == PlayerMusicWheelScore_Yes or PlayerMusicWheelScore(PLAYER_2) == PlayerMusicWheelScore_Yes)
-		local musicWheelScoreNo = (not SLMusicWheelScoreEnabled()) or PlayerMusicWheelScore(PLAYER_1) == PlayerMusicWheelScore_No or PlayerMusicWheelScore(PLAYER_2) == PlayerMusicWheelScore_No
-		-- If MusicWheelScore is No, there's a score displayed on the right side only if it's ITL
-		-- If MusicWheelScore is Yes, there's a score displayed on the right side (regardless of ITL)
-		-- If MusicWheelScore is ReplaceGrade, there's no score displayed on the right side (regardless of ITL)
-		if (musicWheelScoreNo and IsItlSong(song, player)) or musicWheelScoreYes then
-			-- We have ITL_EXscore or Score on the rightmost side
-			x_offset = 60
-		end
-		self:x(_screen.w / (WideScale(2.15, 2.14)) - x_offset)
-
-		-- steps of _this_ actor
-		local steps = SongUtil.GetPlayableSteps(song)
-
-		-- visual vertical position depending on if 1 / 2 players are playing
-		if GAMESTATE:GetNumSidesJoined() == 2 then
-			if player == PLAYER_1 then
-				self:y(-6)
-			else
-				self:y(6)
-			end
-		else
-			self:y(0)
-		end
-
-		local currentSteps = GAMESTATE:GetCurrentSteps(player)
-		if currentSteps == nil then
-			-- SM("currentSteps nil")
-			return
-		end
-
-		local currentDifficulty = currentSteps:GetDifficulty()
-
-		-- Like grades, show tech that matches the currently selected difficulty.
-		local stepsToCheck = nil
-		if #steps == 1 then
-			-- If there's only a single difficulty, don't try to match the difficulty. Just show the only one.
-			stepsToCheck = steps[1]
-		else
-			-- TODO: Match the engine (or theme?) behaviour on which difficulty will be autoselected from this chart
-			for k, v in ipairs(steps) do
-				if v:GetDifficulty() == currentDifficulty then
-					stepsToCheck = v
-				end
-			end
-		end
-
-		--- @type string
-		local preferred_tech_style = ThemePrefs.Get("MusicWheelTechNotation")
-		local text = SLTechNotation_Format(stepsToCheck, pn, preferred_tech_style)
-
-		self:settext(text)
-		self:visible(true)
-	end,
-}
-
-return af
+	Draw = Draw,
+})

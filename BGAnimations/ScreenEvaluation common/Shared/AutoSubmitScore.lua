@@ -262,6 +262,12 @@ local AutoSubmitRequestProcessor = function(res, overlay)
 					if ToEnumShortString("PLAYER_P"..i) == "P"..side then
 						local upperPane = overlay:GetChild("P"..side.."_AF_Upper")
 						if upperPane then
+							-- pass the rank to the local score box
+							local scoreBox = upperPane:GetChild("ScoreProgressP"..side)
+							if scoreBox and personalRank then
+								scoreBox:playcommand("SetGrooveStatsRank", { rank=personalRank, isEx=(showExScore and true or false) })
+							end
+
 							if data[playerStr]["result"] == "score-added" or data[playerStr]["result"] == "improved" then
 								local recordText = overlay:GetChild("AutoSubmitMaster"):GetChild("P"..side.."RecordText")
 								local GSIcon = overlay:GetChild("AutoSubmitMaster"):GetChild("P"..side.."GrooveStats_Logo")

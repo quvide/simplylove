@@ -30,6 +30,9 @@ return Def.ActorFrame{
 	-- Record Texts (Machine and/or Personal)
 	LoadActor("./RecordTexts.lua", player),
 
+	-- Best score / lamp box
+	LoadActor("./ScoreProgress.lua", player),
+
 	-- Event Progress Box
 	LoadActor("./EventProgress.lua", player)
 }
